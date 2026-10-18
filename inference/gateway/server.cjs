@@ -4,7 +4,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const crypto=require('node:crypto');
 const {MODELS,readState}=require('../ensure-models.cjs');
-const ALIASES=Object.freeze(Object.fromEntries(MODELS.map(m=>[m.id,{unsafe:m.id.endsWith('-uncensored'),hasVision:m.id!=='qwen3-coder-next',hasThinking:m.id!=='qwen3-coder-next'}])));
+const ALIASES=Object.freeze(Object.fromEntries(MODELS.map(m=>[m.id,{unsafe:m.id.endsWith('-uncensored'),hasVision:true,hasThinking:true}])));
 const routerLoadTimeoutMs=Number(process.env.MIGUY_ROUTER_LOAD_TIMEOUT_MS)||300000;
 const KEYFILE=process.env.MIGUY_GATEWAY_KEYS_FILE||'/workspace/config/inference-clients.json';
 const UPSTREAM=process.env.MIGUY_INFERENCE_UPSTREAM||'http://127.0.0.1:8080';
@@ -242,7 +242,7 @@ async function handler(req,res){
  const client=checkKey(req.headers.authorization,clients);
  if(!client){fail(res,401,'unauthorized','Valid Bearer API key required');return;}
  if(req.method==='GET'&&path==='/v1/models'){
-  const data=readState().ready.filter(id=>Object.hasOwn(ALIASES,id)&&(!ALIASES[id].unsafe||client.allowUncensored)).map(id=>({id,object:'model',owned_by:'miguy-inference',capabilities:{vision:ALIASES[id].hasVision,thinking:ALIASES[id].hasThinking,tools:true},runtime_status:'available'}));
+  const data=readState().ready.filter(id=>Object.hasOwn(ALIASES,id)&&(!ALIASES[id].unsafe||client.allowUncensored)).map(id=>({id,object:'model',owned_by:'miguy-inference',context_length:Number(process.env.MIGUY_MODEL_CONTEXT||167936),capabilities:{vision:ALIASES[id].hasVision,thinking:ALIASES[id].hasThinking,tools:true},runtime_status:'available'}));
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({object:'list',data}));return;
  }
  if(req.method!=='POST'||path!=='/v1/chat/completions'){fail(res,404,'not_found','Endpoint not available');return;}

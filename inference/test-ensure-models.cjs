@@ -4,7 +4,7 @@ test('Auto-downloader writes verified cache, skips repeat downloads, resumes byt
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'miguy-model-boot-'));
  process.env.MIGUY_MODELS_ROOT=root;
  const {download}=require('./ensure-models.cjs');
- const model={id:'qwen3-coder-next',repo:'Qwen/example',rev:'pinned-revision',folder:'demo'};
+ const model={id:'qwen3.8-27b-uncensored',repo:'Qwen/example',rev:'pinned-revision',folder:'demo'};
  try{
   const payload=Buffer.from('The test data representing a GGUF shard.');
   const hash=crypto.createHash('sha256').update(payload).digest('hex');
@@ -28,4 +28,22 @@ test('Auto-downloader writes verified cache, skips repeat downloads, resumes byt
   const other={...model,folder:'bad'};
   await assert.rejects(()=>download(other,item,{fetchImpl:async()=>new Response(Buffer.alloc(payload.length,1),{status:200})}),/Checksum mismatch/);
  }finally{fs.rmSync(root,{recursive:true,force:true});delete process.env.MIGUY_MODELS_ROOT;}
+});
+
+test('Production model manifest has exactly two Vision-capable model/projector pairs, with no large coder fallback',()=>{
+ const {MODELS,renderPreset,totalBytes}=require('./ensure-models.cjs');
+ assert.deepEqual(MODELS.map(m=>m.id),['qwen3.8-27b-uncensored','qwen3.6-35b-a3b']);
+ assert.equal(MODELS.every(m=>m.shards.length===2&&m.shards[1][0].startsWith('mmproj-')),true);
+ assert.equal(MODELS.reduce((sum,m)=>sum+totalBytes(m),0),38772081312);
+ const preset=renderPreset(MODELS.map(m=>m.id));
+ assert.ok(preset.includes('mmproj-Qwen3.8-27B-Uncensored-F16.gguf'));
+ assert.ok(preset.includes('mmproj-Qwen3.6-35B-A3B-Q8_0.gguf'));
+ assert.ok(!preset.includes('Coder-Next'));
+ const previous=process.env.MIGUY_MODEL_CONTEXT;
+ try {
+  process.env.MIGUY_MODEL_CONTEXT='65536';
+  assert.equal((renderPreset(MODELS.map(m=>m.id)).match(/ctx-size = 65536/g)||[]).length,2,'Smaller GPU can run a verified reduced context without lying about 167K');
+  process.env.MIGUY_MODEL_CONTEXT='32768';
+  assert.equal((renderPreset(MODELS.map(m=>m.id)).match(/ctx-size = 32768/g)||[]).length,2);
+ } finally {if(previous===undefined)delete process.env.MIGUY_MODEL_CONTEXT;else process.env.MIGUY_MODEL_CONTEXT=previous;}
 });

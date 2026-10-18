@@ -18,8 +18,8 @@ command -v node >/dev/null && [ -x /app/llama-server ] || {
 }
 CTX="$(printenv MIGUY_MODEL_CONTEXT || echo 167936)"
 case "$CTX" in ''|*[!0-9]*) echo 'STOP: invalid context value' >&2;exit 47;;esac
-if [ "$CTX" -lt 160000 ];then
- echo 'STOP: context must support 130K input plus 30K output' >&2;exit 47
+if [ "$CTX" -lt 8192 ] || [ "$CTX" -gt 262144 ];then
+ echo 'STOP: context must be 8192..262144; 40GB VRAM capability requires validation' >&2;exit 47
 fi
 if [ "$(printenv MIGUY_APPROVE_COMMUNITY_VARIANT || true)" != "1" ];then
  echo 'STOP: set MIGUY_APPROVE_COMMUNITY_VARIANT=1 to approve the explicitly selected unrestricted GGUF first.' >&2;exit 48
@@ -36,10 +36,10 @@ ROUTER_PID=$!
 
 node /opt/miguy/gateway/server.cjs &
 GATEWAY_PID=$!
-# API is available with first model while the other two download in the background.
+# API is available with first model while the second downloads in the background.
 # The downloader atomically updates the preset, asks llama.cpp to reload model
 # metadata (without restarting), and only THEN advertises a newly ready model.
-echo 'BACKGROUND_DOWNLOADS: preparing Qwen3.6 with Vision then Coder-Next while the first model serves requests.'
+echo 'BACKGROUND_DOWNLOADS: preparing Qwen3.6 with its Vision projector while the first model serves requests.'
 node /opt/miguy/ensure-models.cjs --remaining &
 DOWNLOAD_PID=$!
 TUNNEL_PID=''

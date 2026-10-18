@@ -22,13 +22,6 @@ const MODELS=Object.freeze([
    ['Qwen3.6-35B-A3B-Q4_K_M.gguf',20419565568,'671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7'],
    ['mmproj-Qwen3.6-35B-A3B-Q8_0.gguf',614194304,'904cbf8c8e876220066ab3bf676c7efa40f3da372276fdaf8b01d2fb2a37a51d']
   ]},
- {id:'qwen3-coder-next',folder:'qwen3-coder-next/Qwen3-Coder-Next-Q5_K_M',repo:'Qwen/Qwen3-Coder-Next-GGUF',rev:'b82fb7382639d97b38fa7672e526c760c2fb358e',context:32768,prefix:'Qwen3-Coder-Next-Q5_K_M/',
-  shards:[
-   ['Qwen3-Coder-Next-Q5_K_M-00001-of-00004.gguf',17813589920,'d68162877891c4ba309c8601a69721ecfc7be2091ad99e8175a078ae59decdd3'],
-   ['Qwen3-Coder-Next-Q5_K_M-00002-of-00004.gguf',17479501728,'3da1a3fda1061009126eb48c7098221653ab63e0a266d3b6d04f5eac3ae9aa74'],
-   ['Qwen3-Coder-Next-Q5_K_M-00003-of-00004.gguf',17226413600,'df60c7a55c6e118d4984a829b74df6b9e863dcea749ee7dc25ab5e72913624e1'],
-   ['Qwen3-Coder-Next-Q5_K_M-00004-of-00004.gguf',4190867520,'777ac63a6f94272934996b1cfd7e5619c6804e8580ec4e00311d2a465e298c6a']
-  ]}
 ]);
 function urlFor(m,file){
  const encoded=file.replace(/[^A-Za-z0-9_.-]/g,x=>encodeURIComponent(x));
@@ -99,7 +92,7 @@ async function download(m,[file,bytes,expected],{fetchImpl=globalThis.fetch}={})
 }
 const totalBytes=m=>m.shards.reduce((n,[,s])=>n+s,0);
 const modelPath=m=>safePath(m,m.shards[0][0]);
-const projectorPath=m=>m.id==='qwen3-coder-next'?null:safePath(m,m.shards[1][0]);
+const projectorPath=m=>safePath(m,m.shards[1][0]);
 async function atomicallyWrite(target,data){
  await fsp.mkdir(path.dirname(target),{recursive:true});
  const tmp=target+'.'+process.pid+'.tmp';
@@ -107,12 +100,12 @@ async function atomicallyWrite(target,data){
  await fsp.rename(tmp,target);
 }
 function readState(){
- try{const file=process.env.MIGUY_MODEL_CATALOG_FILE||STATE;const s=JSON.parse(fs.readFileSync(file,'utf8'));return Array.isArray(s.ready)?s:{ready:[]};}
+ try{const file=process.env.MIGUY_MODEL_CATALOG_FILE||STATE;const s=JSON.parse(fs.readFileSync(file,'utf8'));return Array.isArray(s.ready)?{...s,ready:s.ready.filter(id=>MODELS.some(m=>m.id===id))}:{ready:[]};}
  catch(e){if(e.code==='ENOENT')return {ready:[]};throw e;}
 }
 function renderPreset(ready){
  const context=String(process.env.MIGUY_MODEL_CONTEXT||'167936');
- if(!/^[0-9]+$/.test(context)||Number(context)<160000)throw Error('MIGUY_MODEL_CONTEXT must support the configured 130K input plus 30K output target');
+ if(!/^[0-9]+$/.test(context)||Number(context)<8192||Number(context)>262144)throw Error('MIGUY_MODEL_CONTEXT must be between 8192 and 262144; GPU context target is NOT guaranteed to fit VRAM');
  let out='version = 1\n\n[*]\nn-gpu-layers = 99\nflash-attn = on\ncache-type-k = q8_0\ncache-type-v = q8_0\njinja = true\nparallel = 1\nno-context-shift = true\nload-on-startup = false\n\n';
  for(const m of MODELS.filter(x=>ready.includes(x.id))){
   out+='['+m.id+']\nmodel = '+modelPath(m)+'\n'+(projectorPath(m)?'mmproj = '+projectorPath(m)+'\n':'')+'ctx-size = '+context+'\nn-predict = 30000\n\n';

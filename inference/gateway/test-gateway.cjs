@@ -12,7 +12,6 @@ async function setup(){
  const requests=[];
  const statuses=new Map([
   ['qwen3.8-27b-uncensored','unloaded'],
-  ['qwen3-coder-next','unloaded'],
   ['qwen3.6-35b-a3b','unloaded']
  ]);
  const mock=http.createServer(async(req,res)=>{
@@ -33,7 +32,7 @@ async function setup(){
  mock.listen(0,'127.0.0.1');await once(mock,'listening');
  process.env.MIGUY_GATEWAY_KEYS_FILE=config;process.env.MIGUY_GATEWAY_PORT='0';
  process.env.MIGUY_MODEL_CATALOG_FILE=path.join(dir,'ready-models.json');
- fs.writeFileSync(process.env.MIGUY_MODEL_CATALOG_FILE,JSON.stringify({version:2,ready:['qwen3.8-27b-uncensored','qwen3.6-35b-a3b','qwen3-coder-next']}));
+ fs.writeFileSync(process.env.MIGUY_MODEL_CATALOG_FILE,JSON.stringify({version:2,ready:['qwen3.8-27b-uncensored','qwen3.6-35b-a3b']}));
  process.env.MIGUY_APPROVE_COMMUNITY_VARIANT='1';
  process.env.MIGUY_INFERENCE_UPSTREAM='http://127.0.0.1:'+mock.address().port;
  delete require.cache[require.resolve('./server.cjs')]; // each mocked gateway binds its own temporary credential file
@@ -50,9 +49,9 @@ test('Gateway enforces Bearer API keys, per-client model ACL, bounded output, no
   assert.equal((await get('/health')).status,200);
   assert.equal((await get('/v1/models')).status,401);
   const allowed=await (await get('/v1/models',TOKEN)).json();
-  assert.deepEqual(allowed.data.map(x=>x.id),['qwen3.6-35b-a3b','qwen3-coder-next']);
+  assert.deepEqual(allowed.data.map(x=>x.id),['qwen3.6-35b-a3b']);
   const owner=await (await get('/v1/models',TOKEN_ADMIN)).json();
-  assert.equal(owner.data.length,3);
+  assert.equal(owner.data.length,2);
   assert.equal((await get('/models/unload',TOKEN_ADMIN)).status,404);
   const normal={model:'qwen3.6-35b-a3b',messages:[{role:'user',content:'hello'}],max_tokens:256};
   assert.equal((await post(normal,'invalid')).status,401);
@@ -69,7 +68,7 @@ test('Gateway enforces Bearer API keys, per-client model ACL, bounded output, no
   assert.equal(s.requests[0].body.model,'qwen3.6-35b-a3b');
  }finally{await s.close();}
 });
-test('Progressive readiness: first vision model becomes available, refresh reveals second and third; Coder-Next cannot accept images',async()=>{
+test('Progressive readiness: first vision model becomes available, refresh reveals second; removed Coder-Next cannot be selected',async()=>{
  const s=await setup();
  try{
   const headers={Authorization:'Bearer '+TOKEN_ADMIN};
@@ -80,8 +79,7 @@ test('Progressive readiness: first vision model becomes available, refresh revea
   assert.equal((await list())[0].capabilities.vision,true);
   setReady(['qwen3.8-27b-uncensored','qwen3.6-35b-a3b']);
   assert.deepEqual((await list()).map(m=>m.id),['qwen3.8-27b-uncensored','qwen3.6-35b-a3b']);
-  setReady(['qwen3.8-27b-uncensored','qwen3.6-35b-a3b','qwen3-coder-next']);
-  assert.equal((await list())[2].capabilities.vision,false);
+  assert.equal((await list()).length,2);
   const tinyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9ewAAAABJRU5ErkJggg==';
   const request=async(model,uri)=>fetch(s.url+'/v1/chat/completions',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({model,messages:[{role:'user',content:[{type:'text',text:'Read screenshot'},{type:'image_url',image_url:{url:uri}}]}],max_tokens:128})});
   assert.equal((await request('qwen3.8-27b-uncensored',tinyPng)).status,200);
@@ -123,7 +121,7 @@ test('A strong first-run environment API key works without a JSON key file',asyn
   const res=await fetch(s.url+'/v1/models',{headers});
   assert.equal(res.status,200);
   const json=await res.json();
-  assert.deepEqual(json.data.map(x=>x.id),['qwen3.6-35b-a3b','qwen3-coder-next']);
+  assert.deepEqual(json.data.map(x=>x.id),['qwen3.6-35b-a3b']);
   assert.equal((await fetch(s.url+'/models/unload',{headers})).status,404);
  }finally{delete process.env.MIGUY_OWNER_API_KEY;delete process.env.MIGUY_APPROVE_COMMUNITY_VARIANT;await s.close();}
 });
