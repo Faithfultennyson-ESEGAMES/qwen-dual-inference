@@ -21,28 +21,27 @@ case "$CTX" in ''|*[!0-9]*) echo 'STOP: invalid context value' >&2;exit 47;;esac
 if [ "$CTX" -lt 160000 ];then
  echo 'STOP: context must support 130K input plus 30K output' >&2;exit 47
 fi
-if [ "$(printenv MIGUY_ENABLE_SECOND_MODEL || true)" = "1" ] &&
-   [ "$(printenv MIGUY_APPROVE_COMMUNITY_VARIANT || true)" != "1" ];then
- echo 'STOP: approve and pin the second community model variant before download' >&2;exit 48
+if [ "$(printenv MIGUY_APPROVE_COMMUNITY_VARIANT || true)" != "1" ];then
+ echo 'STOP: set MIGUY_APPROVE_COMMUNITY_VARIANT=1 to approve the explicitly selected unrestricted GGUF first.' >&2;exit 48
 fi
 
-echo 'MODEL_SETUP: verifying cache and downloading ONLY missing pinned model shards.'
-node /opt/miguy/ensure-models.cjs
-
-PRESETS=/opt/miguy/models.ini
-if [ "$(printenv MIGUY_ENABLE_SECOND_MODEL || true)" != "1" ]; then
- # Do not advertise a community model unless its owner explicitly opts in.
- PRESETS=/tmp/miguy-one-model.ini
- sed '/^\[qwen3\.8-27b-uncensored\]/,$d' /opt/miguy/models.ini > "$PRESETS"
-fi
+echo 'MODEL_SETUP: downloading and verifying smallest complete model and vision projector FIRST.'
+node /opt/miguy/ensure-models.cjs --initial
+PRESETS="$(printenv MIGUY_ROUTER_PRESET_FILE || echo /workspace/config/active-models.ini)"
 
 echo 'STARTING_PRIVATE_ROUTER: one model resident in VRAM, inference port on loopback only.'
-/app/llama-server --models-preset "$PRESETS" --models-max 1 \
+/app/llama-server --models-preset "$PRESETS" --models-max 1 --models-autoload \
  --host 127.0.0.1 --port 8080 --no-webui >/tmp/miguy-router.log 2>&1 &
 ROUTER_PID=$!
 
 node /opt/miguy/gateway/server.cjs &
 GATEWAY_PID=$!
+# API is available with first model while the other two download in the background.
+# The downloader atomically updates the preset, asks llama.cpp to reload model
+# metadata (without restarting), and only THEN advertises a newly ready model.
+echo 'BACKGROUND_DOWNLOADS: preparing Qwen3.6 with Vision then Coder-Next while the first model serves requests.'
+node /opt/miguy/ensure-models.cjs --remaining &
+DOWNLOAD_PID=$!
 TUNNEL_PID=''
 if [ -n "$(printenv TUNNEL_TOKEN || true)" ];then
  echo 'STARTING_CLOUDFLARE_TUNNEL: hostname is configured externally in Cloudflare.'
@@ -53,7 +52,7 @@ else
 fi
 
 cleanup(){
- kill "$GATEWAY_PID" "$ROUTER_PID" 2>/dev/null || true
+ kill "$DOWNLOAD_PID" "$GATEWAY_PID" "$ROUTER_PID" 2>/dev/null || true
  if [ -n "$TUNNEL_PID" ];then kill "$TUNNEL_PID" 2>/dev/null || true;fi
  wait "$GATEWAY_PID" "$ROUTER_PID" 2>/dev/null || true
 }

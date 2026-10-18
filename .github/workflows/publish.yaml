@@ -2,6 +2,11 @@ name: Build and publish GPU inference image
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'inference/**'
+      - '.github/workflows/publish.yaml'
 
 permissions:
   contents: read
@@ -54,17 +59,19 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          tags: faithfultennysonw/qwen-dual-inference:v1
+          tags: faithfultennysonw/qwen-dual-inference:v3
           cache-from: type=gha
           cache-to: type=gha,mode=min
 
       - name: Check CUDA image and router CLI before publishing
         run: |
-          docker image inspect faithfultennysonw/qwen-dual-inference:v1 --format '{{.Id}}'
-          docker run --rm --entrypoint /bin/sh faithfultennysonw/qwen-dual-inference:v1 -c 'node --version && /usr/local/bin/cloudflared --version && test -x /app/llama-server'
-          docker run --rm --entrypoint /app/llama-server faithfultennysonw/qwen-dual-inference:v1 --help > /tmp/llama-help.txt
+          docker image inspect faithfultennysonw/qwen-dual-inference:v3 --format '{{.Id}}'
+          docker run --rm --entrypoint /bin/sh faithfultennysonw/qwen-dual-inference:v3 -c 'node --version && /usr/local/bin/cloudflared --version && test -x /app/llama-server'
+          docker run --rm --entrypoint /app/llama-server faithfultennysonw/qwen-dual-inference:v3 --help > /tmp/llama-help.txt
           grep -F -- '--models-preset' /tmp/llama-help.txt
           grep -F -- '--models-max' /tmp/llama-help.txt
+          grep -F -- '--models-autoload' /tmp/llama-help.txt
+          grep -F -- '--mmproj' /tmp/llama-help.txt
 
       - name: Publish only tested image to new Docker Hub repository
-        run: docker push faithfultennysonw/qwen-dual-inference:v1
+        run: docker push faithfultennysonw/qwen-dual-inference:v3

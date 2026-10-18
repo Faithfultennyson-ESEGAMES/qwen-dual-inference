@@ -1,0 +1,6 @@
+﻿*.gguf
+*.partial
+*.json.bak
+*.log
+node_modules
+*keys*.json
