@@ -43,25 +43,41 @@ echo 'BACKGROUND_DOWNLOADS: preparing Qwen3.6 with its Vision projector while th
 node /opt/miguy/ensure-models.cjs --remaining &
 DOWNLOAD_PID=$!
 TUNNEL_PID=''
-if [ -n "$(printenv TUNNEL_TOKEN || true)" ];then
- echo 'STARTING_CLOUDFLARE_TUNNEL: hostname is configured externally in Cloudflare.'
- /usr/local/bin/cloudflared tunnel --no-autoupdate run >/tmp/miguy-cloudflared.log 2>&1 &
+TUNNEL_TOKEN_FILE=''
+if [ -n "${TUNNEL_TOKEN:-}" ];then
+ echo 'STARTING_CLOUDFLARE_TUNNEL: optional connector, will not stop the model gateway on failure.'
+ # Explicit token-file avoids leaking bearer credentials in process arguments
+ # or regular container logs. cloudflared 2026.10.0 supports --token-file.
+ umask 077
+ TUNNEL_TOKEN_FILE="/tmp/miguy-cloudflared-token-$$"
+ printf '%s' "$TUNNEL_TOKEN" > "$TUNNEL_TOKEN_FILE"
+ unset TUNNEL_TOKEN
+ export TUNNEL_TOKEN_FILE
+ (
+  attempt=0
+  while :;do
+   attempt=$((attempt+1))
+   echo "TUNNEL_ATTEMPT: $attempt"
+   if /usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file "$TUNNEL_TOKEN_FILE" >/tmp/miguy-cloudflared.log 2>&1;then rc=0;else rc=$?;fi
+   echo "TUNNEL_RETRY: Cloudflare connector exited (code $rc). Inference gateway remains running; retry in 30 seconds."
+   # Never print unredacted tunnel logs: CLI errors may include credentials.
+   sleep 30
+  done
+ ) &
  TUNNEL_PID=$!
 else
- echo 'NOTICE: No Cloudflare Tunnel token provided; use RunPod HTTPS proxy only if port 8787 is configured, and keep the Bearer token private.'
+ echo 'NOTICE: TUNNEL_TOKEN absent. API remains up on configured port 8787, but do not send Bearer keys through unencrypted public HTTP.'
 fi
 
 cleanup(){
  kill "$DOWNLOAD_PID" "$GATEWAY_PID" "$ROUTER_PID" 2>/dev/null || true
  if [ -n "$TUNNEL_PID" ];then kill "$TUNNEL_PID" 2>/dev/null || true;fi
+ if [ -n "$TUNNEL_TOKEN_FILE" ];then rm -f "$TUNNEL_TOKEN_FILE";fi
  wait "$GATEWAY_PID" "$ROUTER_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 while kill -0 "$ROUTER_PID" 2>/dev/null && kill -0 "$GATEWAY_PID" 2>/dev/null; do
- if [ -n "$TUNNEL_PID" ] && ! kill -0 "$TUNNEL_PID" 2>/dev/null;then
-  echo 'STOP: Cloudflare Tunnel unexpectedly exited.' >&2
-  break
- fi
+ # A temporary tunnel failure must never terminate inference or downloads.
  sleep 3
 done
 echo 'STOP: Required inference service exited. Inspect router and gateway logs.'
